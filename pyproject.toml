@@ -1,0 +1,10 @@
+[project]
+name = "systemd-web"
+version = "0.1.0"
+description = "A super simple web control for start/stop/status of systemd services"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "flask>=3.1.0",
+    "python-dotenv>=1.0.1",
+]
