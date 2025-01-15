@@ -4,6 +4,7 @@ import subprocess
 from flask import Flask, request, jsonify, render_template_string, Response
 from dotenv import load_dotenv
 from functools import wraps
+import logging
 
 def create_app(username, password, services):
     app = Flask(__name__)
@@ -17,9 +18,13 @@ def create_app(username, password, services):
                 capture_output=True,
                 check=True
             )
+            logging.debug(result)
             return {"success": True, "output": result.stdout.strip()}
         except subprocess.CalledProcessError as e:
-            return {"success": False, "error": e.stderr.strip()}
+            logging.error(e)
+            if e.returncode == 3:
+                return {"sucess": False, "error": "Service is not running"}
+            return {"success": False, "error": str(e)}
 
     def authenticate(auth_username, auth_password):
         """Check if username/password combination is valid."""
@@ -48,18 +53,12 @@ def create_app(username, password, services):
         <head>
             <title>Systemd Web Control</title>
             <style>
-                body { font-family: Arial, sans-serif; margin: 20px;}
+                body { font-family: Arial, sans-serif; margin: 20px;width:60%;margin:auto;}
                 button { margin: 5px; padding: 10px 15px; }
                 pre { background-color: #f4f4f4; padding: 10px; border: 1px solid #ddd; }
-                .element {
-                    max-width: fit-content;
-                            
-                    margin-left: auto;
-                    margin-right: auto;
-                }
             </style>
         </head>
-        <body class='element'>
+        <body>
             <h1>Systemd Web Control</h1>
             {% for service in services %}
             <div>
@@ -88,12 +87,12 @@ def create_app(username, password, services):
             </script>
         </body>
         </html>
-        """, services=SERVICES)
+        """, services=services)
 
     @app.route("/service/<service>/<action>", methods=["POST"])
     @requires_auth
     def manage_service(service, action):
-        if service not in SERVICES:
+        if service not in services:
             return jsonify({"success": False, "error": f"Service '{service}' is not configured"}), 400
 
         if action in ["start", "stop", "restart", "status"]:
