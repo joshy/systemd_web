@@ -10,3 +10,8 @@ This is a company app for other flask web apps as there are no special dependenc
 
 To run the app simple create a systemd service file with the following executable
 `gunicorn "systemd_web:create_app(username='foo',password='foo',services=['dummy-service'])"`
+
+
+## Publish to pypi
+* uv build
+* uv publish
