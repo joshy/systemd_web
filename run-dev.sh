@@ -1,0 +1,1 @@
+FLASK_DEBUG=1 python systemd_web.py --username admin --password admin --services "dpx@rndnorawe01:curalogic-control,ollama" --host 0.0.0.0 --port 5005
