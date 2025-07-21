@@ -13,34 +13,51 @@ def create_app(username, password, services):
 
     def parse_service_definition(service_def):
         """Parse service definition to extract service name and host info."""
-        if '@' in service_def and ':' in service_def:
+        if "@" in service_def and ":" in service_def:
             # Format: user@host:service_name (remote service)
-            user_host, service_name = service_def.split(':', 1)
-            if '@' in user_host:
-                user, host = user_host.split('@', 1)
-                return service_name.strip(), user.strip(), host.strip(), service_name.strip()
+            user_host, service_name = service_def.split(":", 1)
+            if "@" in user_host:
+                user, host = user_host.split("@", 1)
+                return (
+                    service_name.strip(),
+                    user.strip(),
+                    host.strip(),
+                    service_name.strip(),
+                )
             else:
                 # Format: host:service_name (remote service without user)
-                return service_name.strip(), None, user_host.strip(), service_name.strip()
+                return (
+                    service_name.strip(),
+                    None,
+                    user_host.strip(),
+                    service_name.strip(),
+                )
         else:
             # Local service (no @ or : in the definition)
             return service_def.strip(), None, None, service_def.strip()
 
-    def run_systemctl_command(service, command, host=None, remote_service=None, user=None):
+    def run_systemctl_command(
+        service, command, host=None, remote_service=None, user=None
+    ):
         """Run a systemctl command for a specific service on local or remote host."""
         try:
             if host:
                 # Remote execution via SSH - always use remote_service name
                 target_service = remote_service or service
                 if user:
-                    ssh_cmd = ["ssh", f"{user}@{host}", f"systemctl {command} {target_service}"]
+                    ssh_cmd = [
+                        "ssh",
+                        f"{user}@{host}",
+                        f"systemctl {command} {target_service}",
+                    ]
                 else:
                     ssh_cmd = ["ssh", host, f"systemctl {command} {target_service}"]
+
+                # Add logging to debug the issue
+                logging.info(f"Running SSH command: {' '.join(ssh_cmd)}")
+
                 result = subprocess.run(
-                    ssh_cmd,
-                    text=True,
-                    capture_output=True,
-                    check=True
+                    ssh_cmd, text=True, capture_output=True, check=True
                 )
             else:
                 # Local execution
@@ -48,16 +65,18 @@ def create_app(username, password, services):
                     ["systemctl", command, service],
                     text=True,
                     capture_output=True,
-                    check=True
+                    check=True,
                 )
-            
-            logging.debug(result)
+
+            logging.debug(f"Command output: {result.stdout}")
             return {"success": True, "output": result.stdout.strip()}
         except subprocess.CalledProcessError as e:
-            logging.error(e)
+            logging.error(f"Command failed with return code {e.returncode}")
+            logging.error(f"stdout: {e.stdout}")
+            logging.error(f"stderr: {e.stderr}")
             if e.returncode == 3:
                 return {"success": False, "error": "Service is not running"}
-            return {"success": False, "error": str(e)}
+            return {"success": False, "error": f"Command failed: {e.stderr.strip()}"}
 
     def authenticate(auth_username, auth_password):
         """Check if username/password combination is valid."""
@@ -65,16 +84,19 @@ def create_app(username, password, services):
 
     def requires_auth(f):
         """Decorator to enforce basic authentication."""
+
         @wraps(f)
         def decorated(*args, **kwargs):
             auth = request.authorization
             if not auth or not authenticate(auth.username, auth.password):
                 return Response(
                     "Could not verify your access level for that URL.\n"
-                    "You have to login with proper credentials.", 401,
-                    {"WWW-Authenticate": "Basic realm=\"Login Required\""}
+                    "You have to login with proper credentials.",
+                    401,
+                    {"WWW-Authenticate": 'Basic realm="Login Required"'},
                 )
             return f(*args, **kwargs)
+
         return decorated
 
     @app.route("/")
@@ -83,7 +105,9 @@ def create_app(username, password, services):
         # Parse services to get display names and host info
         service_info = []
         for service_def in services:
-            service_name, user, host, remote_service = parse_service_definition(service_def)
+            service_name, user, host, remote_service = parse_service_definition(
+                service_def
+            )
             if host:
                 if user:
                     display_name = f"{user}@{host}:{service_name}"
@@ -91,16 +115,19 @@ def create_app(username, password, services):
                     display_name = f"{host}:{service_name}"
             else:
                 display_name = service_name
-            service_info.append({
-                'definition': service_def,
-                'display_name': display_name,
-                'service_name': service_name,
-                'user': user,
-                'host': host,
-                'remote_service': remote_service
-            })
-        
-        return render_template_string("""
+            service_info.append(
+                {
+                    "definition": service_def,
+                    "display_name": display_name,
+                    "service_name": service_name,
+                    "user": user,
+                    "host": host,
+                    "remote_service": remote_service,
+                }
+            )
+
+        return render_template_string(
+            """
         <!DOCTYPE html>
         <html>
         <head>
@@ -151,38 +178,69 @@ def create_app(username, password, services):
             </script>
         </body>
         </html>
-        """, service_info=service_info)
+        """,
+            service_info=service_info,
+        )
 
     @app.route("/service/<service>/<action>", methods=["POST"])
     @requires_auth
     def manage_service(service, action):
-        # Decode the service name from URL
-        service = request.view_args['service']
-        
         if service not in services:
-            return jsonify({"success": False, "error": f"Service '{service}' is not configured"}), 400
+            return jsonify(
+                {"success": False, "error": f"Service '{service}' is not configured"}
+            ), 400
 
         if action in ["start", "stop", "restart", "status"]:
             service_name, user, host, remote_service = parse_service_definition(service)
-            result = run_systemctl_command(service_name, action, host, remote_service, user)
+            result = run_systemctl_command(
+                service_name, action, host, remote_service, user
+            )
             return jsonify(result)
 
         return jsonify({"success": False, "error": "Invalid action"}), 400
 
     return app
 
+
 if __name__ == "__main__":
     # Parse the command-line arguments
     parser = argparse.ArgumentParser(description="Systemd Service Manager")
     parser.add_argument(
-        "--services", type=str, help="Comma-separated list of systemd services (format: user@host:service_name for remote or service_name for local)", default=os.getenv("SERVICES", "")
+        "--services",
+        type=str,
+        help="Comma-separated list of systemd services (format: user@host:service_name for remote or service_name for local)",
+        default=os.getenv("SERVICES", ""),
     )
-    parser.add_argument("--host", type=str, help="Host to run the app on", default=os.getenv("HOST", "127.0.0.1"))
-    parser.add_argument("--port", type=int, help="Port to run the app on", default=int(os.getenv("PORT", 5000)))
-    parser.add_argument("--env-file", type=str, help="Path to a .env file", default=None)
-    parser.add_argument("--username", type=str, help="Username for authentication", default=os.getenv("USERNAME", "admin"))
-    parser.add_argument("--password", type=str, help="Password for authentication", default=os.getenv("PASSWORD", "password"))
-    parser.add_argument("--debug", action="store_true", help="Enable debug mode with auto-reload")
+    parser.add_argument(
+        "--host",
+        type=str,
+        help="Host to run the app on",
+        default=os.getenv("HOST", "127.0.0.1"),
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        help="Port to run the app on",
+        default=int(os.getenv("PORT", 5000)),
+    )
+    parser.add_argument(
+        "--env-file", type=str, help="Path to a .env file", default=None
+    )
+    parser.add_argument(
+        "--username",
+        type=str,
+        help="Username for authentication",
+        default=os.getenv("USERNAME", "admin"),
+    )
+    parser.add_argument(
+        "--password",
+        type=str,
+        help="Password for authentication",
+        default=os.getenv("PASSWORD", "password"),
+    )
+    parser.add_argument(
+        "--debug", action="store_true", help="Enable debug mode with auto-reload"
+    )
 
     args = parser.parse_args()
 
@@ -194,8 +252,12 @@ if __name__ == "__main__":
     SERVICES = args.services.split(",") if args.services else []
 
     if not SERVICES:
-        print("No services provided via CLI or .env. Use --services or set SERVICES in .env.")
-        print("Service format: 'user@host:service_name' for remote, 'service_name' for local")
+        print(
+            "No services provided via CLI or .env. Use --services or set SERVICES in .env."
+        )
+        print(
+            "Service format: 'user@host:service_name' for remote, 'service_name' for local"
+        )
         print("Example: 'ubuntu@192.168.1.100:nginx,server2:apache2,mysql'")
         exit(1)
 
